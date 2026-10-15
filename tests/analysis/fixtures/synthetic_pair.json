@@ -1,0 +1,47 @@
+{
+  "schema": "causalab.paired-intervention/v1",
+  "model": {
+    "key": "Qwen/Qwen3-4B",
+    "revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+    "dtype": "bf16"
+  },
+  "tokenizer": {
+    "key": "Qwen/Qwen3-4B",
+    "revision": "1cfa9a7208912126459214e8b04321603b3df60c"
+  },
+  "inputs": {
+    "source": {
+      "text": "alpha beta",
+      "token_ids": [
+        1,
+        2
+      ]
+    },
+    "recipient": {
+      "text": "gamma delta epsilon",
+      "token_ids": [
+        3,
+        4,
+        5
+      ]
+    }
+  },
+  "tokenization": {
+    "add_special_tokens": true,
+    "chat_template": false,
+    "truncation": false
+  },
+  "intervention": {
+    "component": "mlp_neuron_output",
+    "kind": "replacement",
+    "layer": 1,
+    "source_position": 1,
+    "recipient_position": 2,
+    "channels": [
+      0,
+      2
+    ],
+    "alignment": "prespecified last input position"
+  },
+  "artifact_kind": "synthetic_contract_fixture_not_a_model_measurement"
+}

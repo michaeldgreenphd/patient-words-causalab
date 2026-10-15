@@ -574,6 +574,25 @@ register_model(
         parallel_plan=NO_PLAN,
     )
 )
+# Static shape only; this is not a certification of loaded-weight parity.
+# Source: Qwen/Qwen3-4B config.json at
+# 1cfa9a7208912126459214e8b04321603b3df60c (distinct from -Base and -Instruct-2507).
+# The byte-pinned source fixture is tests/protocol/fixtures/qwen3_4b_config.json.
+register_model(
+    ModelInfo(
+        key="Qwen/Qwen3-4B",
+        hidden_size=2560,
+        num_layers=36,
+        num_heads=32,
+        num_kv_heads=8,
+        head_dim=128,
+        intermediate_size=9728,
+        vocab_size=151936,
+        native_dtype="bf16",
+        family="qwen3",
+        parallel_plan=QWEN3_PLAN,
+    )
+)
 register_model(
     ModelInfo(
         key="Qwen/Qwen3-4B-Instruct-2507",
