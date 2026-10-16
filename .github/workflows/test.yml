@@ -52,7 +52,7 @@ jobs:
           for start in range(0, len(paths), 100):
               batch = paths[start:start + 100]
               for command in (["check"], ["format", "--check"]):
-                  subprocess.run(["uvx", "--from", "ruff==0.14.5", "ruff", *command, "--", *batch],
+                  subprocess.run(["uvx", "--from", "ruff==0.14.5", "ruff", *command, "--force-exclude", "--", *batch],
                                  check=True)
           PYCODE
       - name: Python syntax and tracked file size checks
