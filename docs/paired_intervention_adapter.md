@@ -60,6 +60,15 @@ Indices are zero-based, with specials included. Donor and recipient positions
 may differ. Runtime tokenization must reproduce every declared token ID exactly.
 No chat template is applied. Unsupported chat/think/truncation conventions must
 be handled explicitly in a later adapter change, not silently substituted.
+The bounded adapter accepts only the registry's `qwen3` family, with runtime
+config-family and geometry checks; it does not guess family from a model name.
+Other registered families return `unsupported_output_semantics` before execution.
+This boundary matters because an `lm_head` tap is not universally the final model
+output: Gemma2, for example, applies a logit softcap afterward. Supporting another
+family requires actual final-output extraction and parity checks, not relabeling
+its head tensor. The Qwen3 restriction does not certify released-weight parity;
+that remains a separate unrun study prerequisite.
+
 Full model/output logits at **all input positions** are retained separately for
 source, recipient and patched executions. Selected activation tensors are saved
 separately. There is no answer filter, normalization, task metric or correctness
@@ -125,3 +134,81 @@ rejection, and exact-model static geometry. Full `run_protocol` tests are presen
 but skip if the compiled safetensors backend is unavailable. The full repository
 suite and released-weight baseline parity remain required in the complete locked
 environment before a research run is considered ready.
+
+## Local installation check — 2026-10-15
+
+The local preparation pass completed on the existing adapter branch at
+`c153200275c9ceed070f396b3d3445d22bd5b2bd`, without modifying code or dependency
+pins. This is an installation check, not a study run or released-weight parity
+result. The host was arm64 macOS with 16 GiB RAM and Apple Command Line Tools
+already installed. No system prerequisite, shell profile or engine environment
+was changed.
+
+Rust 1.98.1 (`48a229cea`, cargo `797e8a9bc`) was installed under an isolated
+external directory. `requirements.lock.txt` matched a frozen export of `uv.lock`.
+The existing independent Python 3.12.14 environment was completed using
+`pip install --require-hashes -r requirements.lock.txt`; all **84** applicable
+base dependency versions matched the lock, and `pip check` passed. The existing
+pytest 8.4.2 and Ruff 0.14.5 remain separate development tools. This is the base
+runtime install, not the complete optional/dev dependency set.
+
+The wheel was built with Maturin 1.15.0, `build-args=--locked`, two Cargo jobs,
+and external build/output directories. The arm64 abi3 wheel SHA256 was
+`f0672b333f1198eafa8dffe0fd862e47962fd4e2b03856b0e90355bd26614068`;
+the installed `_core.abi3.so` SHA256 was
+`511a0e68a5a5d6ba2d897d5e1db12a2e0b0b2e041abf9d64ce26b7ab1c1cbc77`.
+Wheel construction took 61.61 s wall time with process maximum RSS
+368,050,176 bytes. These host-specific installation figures do not estimate
+Qwen model or optimization capacity.
+
+The commands from `docs/standalone_install.md` were exercised against the
+installed wheel from outside the checkout:
+
+- `causalab validate .../interchange.json --engine auto --data-root .../fixtures/data`
+  passed.
+- `causalab run .../minimal_cpu.json --engine auto --device cpu --data-root
+  .../fixtures/data --artifacts-root .../fixtures/artifacts --out
+  /private/tmp/pw-causal-runtime/installation-check/minimal_cpu` completed both
+  eligible cells and wrote the two expected JSON files. Its tiny random Llama
+  fixture is pinned at `9fb191250dd56d0ba7ec9785a025ed29c03d5998`; downloaded
+  fixture files totalled 6,476,958 bytes. The run took 26.15 s including download,
+  with process maximum RSS 496,320,512 bytes. Upstream fixture metadata warns
+  about `pad_token_id=-1`; it was preserved, not edited.
+- The standalone workflow smoke selected `demos/methods/workflows/weekdays.json`:
+  both `validate --data` and `explain` passed from a fresh external directory.
+- The adapter, native-probe, public-runtime, family-contract and capability-registry
+  selection passed **208 tests** in 3.88 s. All three Rust-backed public-runtime
+  tests executed, including both self-patch identities and exceptional hook
+  cleanup. Three warnings report unrelated cold fixture caches in offline mode.
+
+A further synthetic installation check ran the engine's new read-only protocol
+with a random tiny Qwen3 architecture, local tokenizer, seed 7, bf16 and SDPA.
+Both `[1,1,16]` output tensors exactly matched direct aligned forwards and no
+hooks remained. This caught and corrected a caller-side input-role mapping
+before the check passed; it did not execute the reviewed study case or establish
+released Qwen3-4B parity.
+
+The installation manifest, exact commands, dependency conformance, fixture/output
+hashes and logs are external local artifacts under `/private/tmp/pw-causal-runtime/`
+and `/private/tmp/pw-causal-runtime-handoff.md`. They are explicitly labelled
+installation checks and are outside study measurement collectors. The temporary
+paths are not portable or permanent deployment locations. Rebuild for the target
+CI platform with the same locks; an arm64 macOS wheel cannot serve Linux CI.
+
+The full upstream suite and CUDA checks were not run. No Qwen3-4B weights or
+PatientWords case was executed. Local runtime readiness is established; study
+model/tokenizer compatibility and original-model baseline parity remain separate,
+unrun gates. Lens-fit provenance is not required to prepare that lens-independent
+baseline check, but this installation does not resolve any lens provenance gap.
+
+## Review boundary correction — 2026-10-16 UTC
+
+Review identified that other registered families can transform logits after
+`lm_head`. The adapter now refuses them by registry family before execution,
+while the existing runtime config-family check remains in force. Two regression
+checks cover the named non-Qwen3 refusal without output creation and registry
+family taking precedence over the model's spelling. The edited source plus the
+existing compiled extension passed the adapter and public-runtime test modules:
+**62 passed**, no skips, with three offline-cache warnings for unrelated tiny
+fixtures. Targeted Ruff and `git diff --check` passed. No dependencies were
+reinstalled; the installation smoke and released-model parity were not repeated.

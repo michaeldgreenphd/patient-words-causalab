@@ -117,6 +117,12 @@ def build_pair_protocol(spec: Mapping[str, Any]) -> dict[str, Any]:
             "only explicit plain, untruncated tokenizer-specials mode is supported",
         )
     info = get_model_info(key)
+    if info.family != "qwen3":
+        raise PairRefusal(
+            "unsupported_output_semantics",
+            "this adapter verifies lm_head output semantics only for the qwen3 "
+            "family; other families need actual final-output capture and parity",
+        )
     try:
         component, kind, layer = edit["component"], edit["kind"], edit["layer"]
         source_pos, recipient_pos = edit["source_position"], edit["recipient_position"]
