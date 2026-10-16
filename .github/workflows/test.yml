@@ -1,90 +1,108 @@
 name: Tests
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, ready_for_review]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
-    
-# Cancel in-progress runs when a new commit is pushed
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  workflow_dispatch:
+    inputs:
+      full_suite:
+        description: "Explicitly authorize the heavyweight non-golden suite"
+        type: boolean
+        default: false
+      expected_commit:
+        description: "Exact reviewed main commit; equality assertion, not a checkout ref"
+        type: string
+        required: true
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  lint:
+  review-checks:
     runs-on: ubuntu-latest
-    # Don't run on forks for security (they can't push back anyway)
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    timeout-minutes: 15
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # Need to use a token with write access to push commits
-          token: ${{ secrets.GITHUB_TOKEN }}
-          # Fetch full history to allow pushing
-          fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v4
         with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Run pre-commit hooks
-        id: pre-commit
-        run: uv run pre-commit run --all-files
-        continue-on-error: true
-
-      - name: Auto-commit lint fixes
-        if: github.event_name == 'pull_request_target' && steps.pre-commit.outcome == 'failure'
-        uses: stefanzweifel/git-auto-commit-action@v5
+          enable-cache: false
+      - uses: actions/setup-python@v5
         with:
-          commit_message: "style: auto-fix linting issues"
-          branch: ${{ github.event.pull_request.head.ref }}
+          python-version: "3.12"
+      # Same Ruff version as .pre-commit-config.yaml, without mutation or autofix.
+      - name: Lint and format checks without the runtime dependency environment
+        run: |
+          python -I - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import subprocess
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0")
+          paths = [os.fsdecode(p) for p in tracked if p]
+          paths = [p for p in paths if Path(p).is_file() and Path(p).suffix in {".py", ".pyi"}]
+          if not paths:
+              raise SystemExit("No tracked Python files found for Ruff checks")
+          for start in range(0, len(paths), 100):
+              batch = paths[start:start + 100]
+              for command in (["check"], ["format", "--check"]):
+                  subprocess.run(["uvx", "--from", "ruff==0.14.5", "ruff", *command, "--force-exclude", "--", *batch],
+                                 check=True)
+          PYCODE
+      - name: Python syntax and tracked file size checks
+        run: |
+          python -I -m compileall -q causalab tests
+          python -I - <<'PY'
+          import pathlib
+          import subprocess
+          paths = subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0")
+          oversized = [p.decode() for p in paths if p and pathlib.Path(p.decode()).is_file()
+                       and pathlib.Path(p.decode()).stat().st_size > 51200 * 1024]
+          if oversized:
+              raise SystemExit("Tracked files exceed the existing 50 MiB limit: " + repr(oversized))
+          PY
+      # Rust formatting is deferred for this bootstrap: PR-controlled toolchain
+      # and formatter configuration must not select automatic executables.
+      # Reintroducing it requires a separately reviewed input-isolation design.
 
-      - name: Fail if pre-commit failed
-        if: steps.pre-commit.outcome == 'failure'
-        run: exit 1
-
-  test:
+  full-suite:
+    # This job is deliberately absent from automatic PR/push coverage. It keeps
+    # the existing suite available only after a separate owner authorization.
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.full_suite &&
+      github.ref == 'refs/heads/main' && github.run_attempt == 1 &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    needs: review-checks
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
-      pull-requests: write
+    timeout-minutes: 120
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+      - name: Require the reviewed dispatch commit
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] && [[ "$EXPECTED_COMMIT" == "$GITHUB_SHA" ]] || exit 2
+      - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v4
         with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-
-      - name: Install dependencies
+          enable-cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the existing locked runtime
         run: uv sync --frozen
-
-      - name: Run tests
-        run: uv run pytest -v -m "not golden" --junit-xml=pytest.xml
-
-      - name: Publish test results
-        if: always()
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        with:
-          files: pytest.xml
+      - name: Run the existing heavyweight test selection
+        env:
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+        run: uv run --no-sync pytest -v -m "not golden" --junit-xml=pytest.xml
+      # Results stay in the job log; no checks/pull-request write token is used.
