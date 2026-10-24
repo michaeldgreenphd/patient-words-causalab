@@ -125,7 +125,6 @@ def test_named_refusals(field: str, value: Any, code: str) -> None:
     assert result["code"] == code
 
 
-
 def test_registered_post_head_model_refuses_before_execution(tmp_path: Path) -> None:
     from causalab.analysis.paired_intervention import run_pair
 
@@ -135,10 +134,16 @@ def test_registered_post_head_model_refuses_before_execution(tmp_path: Path) -> 
     result = validate_pair(spec)
     assert result["status"] == "unsupported"
     assert result["code"] == "unsupported_output_semantics"
-    assert run_pair(
-        spec, model=None, tokenizer=None, output_directory=tmp_path / "run",
-        environment="synthetic_test",
-    ) == result
+    assert (
+        run_pair(
+            spec,
+            model=None,
+            tokenizer=None,
+            output_directory=tmp_path / "run",
+            environment="synthetic_test",
+        )
+        == result
+    )
     assert not (tmp_path / "run").exists()
 
 
@@ -149,7 +154,8 @@ def test_output_semantics_uses_registry_family_not_name(
 
     spec = sample_spec()
     monkeypatch.setattr(
-        paired_intervention, "get_model_info",
+        paired_intervention,
+        "get_model_info",
         lambda _key: SimpleNamespace(family="gemma2"),
     )
     result = validate_pair(spec)
